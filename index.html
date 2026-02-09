@@ -5,29 +5,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Audio2Text — Minimal Meeting Assistant</title>
     <link rel="stylesheet" href="styles.css" />
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
     <script defer src="app.js"></script>
   </head>
   <body>
+    <div class="bg-orb orb-a"></div>
+    <div class="bg-orb orb-b"></div>
+    <div class="bg-orb orb-c"></div>
+
     <header class="site-header">
       <div class="brand">
-        <span class="brand-mark"></span>
-        <div>
-          <p class="brand-eyebrow">Audio2Text</p>
-          <h1>Meeting transcripts, summaries, minutes.</h1>
-        </div>
+        <p class="brand-eyebrow">Audio2Text</p>
+        <h1>Meeting Workspace</h1>
+        <p class="muted">Transcribe, summarize, and publish structured minutes in one flow.</p>
       </div>
       <nav class="meta">
-        <span>Swiss minimal UI</span>
         <span>AI powered</span>
+        <span>Apple-like UI</span>
       </nav>
     </header>
 
-    <main class="grid">
-      <section class="panel panel-input">
-        <h2>Capture</h2>
-        <p class="muted">
-          Record live audio or upload a file. Select the spoken language to improve accuracy.
-        </p>
+    <main class="app-shell">
+      <section class="panel row-panel capture-row">
+        <div class="capture-intro">
+          <h2>Capture</h2>
+          <p class="muted">Record or upload audio, choose the language, and generate a detailed transcript.</p>
+        </div>
         <div class="field">
           <label for="language">Language</label>
           <select id="language">
@@ -60,28 +64,49 @@
         <div class="status" id="status">Ready.</div>
       </section>
 
-      <section class="panel">
-        <h2>Transcript</h2>
-        <textarea id="transcript" placeholder="Live transcription appears here..."></textarea>
-        <div class="actions">
-          <button id="summarize">Generate summary</button>
-          <button id="minutes" class="ghost">Generate meeting minutes</button>
+      <section class="panel row-panel transcript-row">
+        <div class="pane">
+          <div class="pane-head">
+            <h2>Transcript Markdown</h2>
+            <button id="copy-transcript-md" class="ghost">Copy markdown</button>
+          </div>
+          <textarea id="transcript" placeholder="Detailed Markdown transcript appears here..."></textarea>
+          <div class="actions">
+            <button id="summarize">Generate summary</button>
+            <button id="minutes" class="ghost">Generate meeting minutes</button>
+          </div>
+        </div>
+        <div class="pane">
+          <div class="pane-head">
+            <h2>Transcript Preview</h2>
+          </div>
+          <div id="transcript-preview" class="output markdown-preview"></div>
         </div>
       </section>
 
-      <section class="panel">
-        <h2>Summary</h2>
-        <div id="summary" class="output"></div>
-      </section>
+      <section class="output-row">
+        <article class="panel row-panel output-card">
+          <div class="pane-head">
+            <h2>Summary</h2>
+            <button id="copy-summary-md" class="ghost">Copy markdown</button>
+          </div>
+          <textarea id="summary-markdown" readonly placeholder="Summary markdown output..."></textarea>
+          <div id="summary" class="output markdown-preview"></div>
+        </article>
 
-      <section class="panel">
-        <h2>Meeting minutes</h2>
-        <div id="minutes-output" class="output"></div>
+        <article class="panel row-panel output-card">
+          <div class="pane-head">
+            <h2>Meeting Minutes</h2>
+            <button id="copy-minutes-md" class="ghost">Copy markdown</button>
+          </div>
+          <textarea id="minutes-markdown" readonly placeholder="Meeting minutes markdown output..."></textarea>
+          <div id="minutes-output" class="output markdown-preview"></div>
+        </article>
       </section>
     </main>
 
     <footer class="site-footer">
-      <p>Requires an API server with `OPENAI_API_KEY` set. Works best in Chromium browsers.</p>
+      <p>Requires an API server with `OPENAI_API_KEY` set.</p>
     </footer>
   </body>
 </html>

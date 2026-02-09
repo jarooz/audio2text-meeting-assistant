@@ -66,7 +66,33 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
           : undefined,
     });
 
-    return res.json({ transcript: transcription.text || "" });
+    const rawTranscript = transcription.text || "";
+
+    const formatted = await openai.responses.create({
+      model: "gpt-4.1-mini",
+      input: [
+        {
+          role: "system",
+          content:
+            "You format transcripts into detailed, well-structured Markdown without losing content fidelity.",
+        },
+        {
+          role: "user",
+          content:
+            "Convert this transcript into detailed Markdown. " +
+            "Output must be factual and based only on the transcript. " +
+            "Use these sections exactly: " +
+            "# Transcript, ## Metadata, ## Structured Transcript, ## Key Topics Mentioned, ## Clarifications Needed. " +
+            "In Metadata include language and a note that speaker labels are inferred when uncertain. " +
+            "In Structured Transcript, break into logical turns as bullet points; use **Speaker 1**, **Speaker 2** only when a speaker change is obvious, otherwise use **Speaker (unidentified)**. " +
+            "Do not invent timestamps or names. " +
+            `Language preference: ${selectedLanguage}. ` +
+            `Raw transcript:\n${rawTranscript}`,
+        },
+      ],
+    });
+
+    return res.json({ transcript: formatted.output_text?.trim() || rawTranscript });
   } catch (error) {
     return res.status(500).json({
       error: error?.message || "Failed to transcribe audio.",
@@ -93,15 +119,22 @@ app.post("/api/analyze", async (req, res) => {
         {
           role: "system",
           content:
-            "You turn meeting transcripts into concise summaries and actionable minutes for business users.",
+            "You produce detailed, professional Markdown meeting documentation for business users.",
         },
         {
           role: "user",
           content:
             `Language preference: ${language}. ` +
             "Return valid JSON only with keys: summary, minutes. " +
-            "summary: a concise 5-8 bullet summary. " +
-            "minutes: markdown sections for Agenda, Key Discussion Points, Decisions, Action Items (with owner and due date if present), Open Questions. " +
+            "Both summary and minutes must be fully formatted Markdown and highly detailed. " +
+            "summary format requirements: " +
+            "# Meeting Summary, ## Executive Overview, ## Business Context, ## Detailed Highlights, ## Risks and Dependencies, ## Next-step Focus. " +
+            "Use rich bullet points with concrete details and references to transcript content. " +
+            "minutes format requirements: " +
+            "# Meeting Minutes, ## Meeting Context, ## Agenda Covered, ## Detailed Discussion Log, ## Decisions Made, ## Action Items, ## Open Questions, ## Follow-up Plan. " +
+            "For Action Items include a Markdown table with columns: Item, Owner, Due Date, Priority, Status. " +
+            "If owner or due date is missing, write Unknown. " +
+            "Do not hallucinate facts; if missing, explicitly state Unknown or Not specified. " +
             `Transcript:\n${transcript}`,
         },
       ],

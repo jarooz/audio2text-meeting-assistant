@@ -4,11 +4,17 @@ const transcribeButton = document.getElementById("transcribe");
 const transcript = document.getElementById("transcript");
 const summaryOutput = document.getElementById("summary");
 const minutesOutput = document.getElementById("minutes-output");
+const transcriptPreview = document.getElementById("transcript-preview");
+const summaryMarkdown = document.getElementById("summary-markdown");
+const minutesMarkdown = document.getElementById("minutes-markdown");
 const statusLine = document.getElementById("status");
 const languageSelect = document.getElementById("language");
 const fileInput = document.getElementById("audio-file");
 const summarizeButton = document.getElementById("summarize");
 const minutesButton = document.getElementById("minutes");
+const copyTranscriptButton = document.getElementById("copy-transcript-md");
+const copySummaryButton = document.getElementById("copy-summary-md");
+const copyMinutesButton = document.getElementById("copy-minutes-md");
 
 let mediaRecorder;
 let chunks = [];
@@ -17,6 +23,31 @@ let recordedBlob = null;
 
 const setStatus = (message) => {
   statusLine.textContent = message;
+};
+
+const renderMarkdown = (markdown, targetElement) => {
+  if (!targetElement) return;
+  if (!markdown?.trim()) {
+    targetElement.innerHTML = "";
+    return;
+  }
+
+  const unsafe = window.marked?.parse(markdown) || markdown;
+  const safe = window.DOMPurify?.sanitize(unsafe) || unsafe;
+  targetElement.innerHTML = safe;
+};
+
+const copyMarkdown = async (text, label) => {
+  if (!text?.trim()) {
+    setStatus(`No ${label} markdown to copy.`);
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    setStatus(`${label} markdown copied.`);
+  } catch (error) {
+    setStatus(`Clipboard error: ${error.message}`);
+  }
 };
 
 const postJSON = async (url, payload) => {
@@ -119,6 +150,7 @@ const transcribeAudio = async () => {
 
     const text = data.transcript || "";
     transcript.value = transcript.value ? `${transcript.value}\n${text}` : text;
+    renderMarkdown(transcript.value, transcriptPreview);
     setStatus("Transcription complete.");
   } catch (error) {
     setStatus(error.message);
@@ -160,12 +192,21 @@ languageSelect.addEventListener("change", () => {
   }
 });
 
+transcript.addEventListener("input", () => {
+  renderMarkdown(transcript.value, transcriptPreview);
+});
+
+copyTranscriptButton.addEventListener("click", () => copyMarkdown(transcript.value, "Transcript"));
+copySummaryButton.addEventListener("click", () => copyMarkdown(summaryMarkdown.value, "Summary"));
+copyMinutesButton.addEventListener("click", () => copyMarkdown(minutesMarkdown.value, "Minutes"));
+
 summarizeButton.addEventListener("click", async () => {
   try {
     summarizeButton.disabled = true;
     const data = await generateOutputs();
     if (data) {
-      summaryOutput.textContent = data.summary;
+      summaryMarkdown.value = data.summary;
+      renderMarkdown(data.summary, summaryOutput);
     }
   } catch (error) {
     setStatus(error.message);
@@ -179,7 +220,8 @@ minutesButton.addEventListener("click", async () => {
     minutesButton.disabled = true;
     const data = await generateOutputs();
     if (data) {
-      minutesOutput.textContent = data.minutes;
+      minutesMarkdown.value = data.minutes;
+      renderMarkdown(data.minutes, minutesOutput);
     }
   } catch (error) {
     setStatus(error.message);
@@ -188,4 +230,5 @@ minutesButton.addEventListener("click", async () => {
   }
 });
 
+renderMarkdown(transcript.value, transcriptPreview);
 setStatus("Ready. Upload or record audio.");
