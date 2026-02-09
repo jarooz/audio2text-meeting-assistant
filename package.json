@@ -1,0 +1,16 @@
+{
+  "name": "audio2text-meeting-assistant",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "multer": "^1.4.5-lts.2",
+    "openai": "^4.104.0"
+  }
+}

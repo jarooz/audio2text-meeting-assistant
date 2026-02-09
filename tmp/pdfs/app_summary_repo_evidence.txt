@@ -1,0 +1,30 @@
+APP SUMMARY (REPO-EVIDENCE BASED)
+
+What it is
+- Not found in repo.
+- The workspace currently contains only Git metadata and no app source files.
+
+Who it's for
+- Not found in repo.
+
+What it does
+- Initializes a Git repository structure (.git present).
+- Tracks branch state (current branch: main).
+- Provides standard Git hook templates under .git/hooks.
+- Contains local Git config scaffolding (.git/config).
+- Contains no committed app code (HEAD is not valid yet).
+- Contains no runnable app entrypoints or build files.
+
+How it works (architecture overview)
+- Components: Git metadata only (refs, hooks, config, HEAD).
+- Services: Not found in repo.
+- Data flow: Not found in repo.
+- Runtime architecture: Not found in repo.
+
+How to run (minimal getting started)
+- App run steps: Not found in repo (no executable app files).
+- To verify current state: run `git status` in the repo root.
+- To proceed, add app source files and run instructions, then document startup commands.
+
+Evidence captured on February 9, 2026 from repository contents in
+/Users/soorajkumar/Documents/New project.

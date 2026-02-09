@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Audio2Text — Minimal Meeting Assistant</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <header class="site-header">
+      <div class="brand">
+        <span class="brand-mark"></span>
+        <div>
+          <p class="brand-eyebrow">Audio2Text</p>
+          <h1>Meeting transcripts, summaries, minutes.</h1>
+        </div>
+      </div>
+      <nav class="meta">
+        <span>Swiss minimal UI</span>
+        <span>AI powered</span>
+      </nav>
+    </header>
+
+    <main class="grid">
+      <section class="panel panel-input">
+        <h2>Capture</h2>
+        <p class="muted">
+          Record live audio or upload a file. Select the spoken language to improve accuracy.
+        </p>
+        <div class="field">
+          <label for="language">Language</label>
+          <select id="language">
+            <option value="auto" selected>Auto detect</option>
+            <option value="en">English</option>
+            <option value="en-IN">English (India)</option>
+            <option value="ta">Tamil</option>
+            <option value="tanglish">Tanglish (English + Tamil)</option>
+            <option value="hi">Hindi</option>
+            <option value="kn">Kannada</option>
+            <option value="ml">Malayalam</option>
+            <option value="te">Telugu</option>
+            <option value="mr">Marathi</option>
+            <option value="gu">Gujarati</option>
+            <option value="bn">Bengali</option>
+            <option value="pa">Punjabi</option>
+            <option value="or">Odia</option>
+            <option value="as">Assamese</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="audio-file">Upload audio</label>
+          <input id="audio-file" type="file" accept="audio/*" />
+        </div>
+        <div class="actions">
+          <button id="record">Start recording</button>
+          <button id="stop" class="ghost" disabled>Stop</button>
+          <button id="transcribe" class="ghost">Transcribe audio</button>
+        </div>
+        <div class="status" id="status">Ready.</div>
+      </section>
+
+      <section class="panel">
+        <h2>Transcript</h2>
+        <textarea id="transcript" placeholder="Live transcription appears here..."></textarea>
+        <div class="actions">
+          <button id="summarize">Generate summary</button>
+          <button id="minutes" class="ghost">Generate meeting minutes</button>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Summary</h2>
+        <div id="summary" class="output"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Meeting minutes</h2>
+        <div id="minutes-output" class="output"></div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <p>Requires an API server with `OPENAI_API_KEY` set. Works best in Chromium browsers.</p>
+    </footer>
+  </body>
+</html>
