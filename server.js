@@ -1,6 +1,7 @@
 import express from "express";
 import multer from "multer";
 import OpenAI, { toFile } from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import dotenv from "dotenv";
@@ -14,13 +15,23 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const port = process.env.PORT || 3000;
-const apiKey = process.env.OPENAI_API_KEY;
+const groqApiKey = process.env.GROQ_API_KEY;
+const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
 
-if (!apiKey) {
-  console.error("Missing OPENAI_API_KEY in environment.");
+if (!groqApiKey) {
+  console.error("Missing GROQ_API_KEY in environment.");
+}
+if (!anthropicApiKey) {
+  console.error("Missing ANTHROPIC_API_KEY in environment.");
 }
 
-const openai = new OpenAI({ apiKey });
+// Groq hosts Whisper via an OpenAI-compatible API
+const groq = new OpenAI({
+  apiKey: groqApiKey,
+  baseURL: "https://api.groq.com/openai/v1",
+});
+
+const anthropic = new Anthropic({ apiKey: anthropicApiKey });
 
 const localeToLanguageCode = {
   auto: undefined,
@@ -44,8 +55,11 @@ app.use(express.json({ limit: "2mb" }));
 app.use(express.static(__dirname));
 
 app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
-  if (!process.env.OPENAI_API_KEY) {
-    return res.status(500).json({ error: "Server is missing OPENAI_API_KEY." });
+  if (!groqApiKey) {
+    return res.status(500).json({ error: "Server is missing GROQ_API_KEY." });
+  }
+  if (!anthropicApiKey) {
+    return res.status(500).json({ error: "Server is missing ANTHROPIC_API_KEY." });
   }
 
   if (!req.file) {
@@ -56,8 +70,9 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
     const selectedLanguage = req.body.language || "auto";
     const language = localeToLanguageCode[selectedLanguage] || undefined;
 
-    const transcription = await openai.audio.transcriptions.create({
-      model: "gpt-4o-mini-transcribe",
+    // Transcribe with Groq Whisper (open-source SOTA)
+    const transcription = await groq.audio.transcriptions.create({
+      model: "whisper-large-v3-turbo",
       file: await toFile(req.file.buffer, req.file.originalname || "audio.webm"),
       ...(language ? { language } : {}),
       prompt:
@@ -68,14 +83,12 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
 
     const rawTranscript = transcription.text || "";
 
-    const formatted = await openai.responses.create({
-      model: "gpt-4.1-mini",
-      input: [
-        {
-          role: "system",
-          content:
-            "You format transcripts into detailed, well-structured Markdown without losing content fidelity.",
-        },
+    // Format with Anthropic Claude
+    const formatted = await anthropic.messages.create({
+      model: "claude-opus-4-6",
+      max_tokens: 4096,
+      system: "You format transcripts into detailed, well-structured Markdown without losing content fidelity.",
+      messages: [
         {
           role: "user",
           content:
@@ -92,7 +105,13 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
       ],
     });
 
-    return res.json({ transcript: formatted.output_text?.trim() || rawTranscript });
+    const formattedText = formatted.content
+      .filter((b) => b.type === "text")
+      .map((b) => b.text)
+      .join("")
+      .trim();
+
+    return res.json({ transcript: formattedText || rawTranscript });
   } catch (error) {
     return res.status(500).json({
       error: error?.message || "Failed to transcribe audio.",
@@ -101,8 +120,8 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
 });
 
 app.post("/api/analyze", async (req, res) => {
-  if (!process.env.OPENAI_API_KEY) {
-    return res.status(500).json({ error: "Server is missing OPENAI_API_KEY." });
+  if (!anthropicApiKey) {
+    return res.status(500).json({ error: "Server is missing ANTHROPIC_API_KEY." });
   }
 
   const transcript = req.body?.transcript?.trim();
@@ -113,14 +132,11 @@ app.post("/api/analyze", async (req, res) => {
   }
 
   try {
-    const response = await openai.responses.create({
-      model: "gpt-4.1-mini",
-      input: [
-        {
-          role: "system",
-          content:
-            "You produce detailed, professional Markdown meeting documentation for business users.",
-        },
+    const response = await anthropic.messages.create({
+      model: "claude-opus-4-6",
+      max_tokens: 8192,
+      system: "You produce detailed, professional Markdown meeting documentation for business users. Always respond with valid JSON only.",
+      messages: [
         {
           role: "user",
           content:
@@ -138,24 +154,15 @@ app.post("/api/analyze", async (req, res) => {
             `Transcript:\n${transcript}`,
         },
       ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "meeting_outputs",
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              summary: { type: "string" },
-              minutes: { type: "string" },
-            },
-            required: ["summary", "minutes"],
-          },
-        },
-      },
     });
 
-    const parsed = JSON.parse(response.output_text || "{}");
+    const outputText = response.content
+      .filter((b) => b.type === "text")
+      .map((b) => b.text)
+      .join("")
+      .trim();
+
+    const parsed = JSON.parse(outputText || "{}");
     return res.json({
       summary: parsed.summary || "No summary generated.",
       minutes: parsed.minutes || "No minutes generated.",
