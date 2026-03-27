@@ -1,26 +1,47 @@
 import express from "express";
 import multer from "multer";
 import OpenAI, { toFile } from "openai";
+import Anthropic from "@anthropic-ai/sdk";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
+import { readFile, unlink, mkdir, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { randomBytes } from "node:crypto";
 import dotenv from "dotenv";
 
 dotenv.config();
 
+const execAsync = promisify(exec);
+
 const app = express();
-const upload = multer({ storage: multer.memoryStorage() });
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: (parseInt(process.env.MAX_UPLOAD_MB) || 1024) * 1024 * 1024 },
+});
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const port = process.env.PORT || 3000;
-const apiKey = process.env.OPENAI_API_KEY;
+const groqApiKey = process.env.GROQ_API_KEY;
+const anthropicApiKey = process.env.ANTHROPIC_API_KEY;
+// How big a file can be before we chunk it (Groq limit is ~25MB but duration matters more)
+const DIRECT_MAX_MB = parseInt(process.env.DIRECT_TRANSCRIBE_MAX_MB) || 20;
+const CHUNK_MINUTES = parseInt(process.env.TRANSCRIBE_CHUNK_MINUTES) || 8;
 
-if (!apiKey) {
-  console.error("Missing OPENAI_API_KEY in environment.");
-}
+if (!groqApiKey) console.error("Missing GROQ_API_KEY in environment.");
+if (!anthropicApiKey) console.error("Missing ANTHROPIC_API_KEY in environment.");
 
-const openai = new OpenAI({ apiKey });
+// Groq hosts Whisper via an OpenAI-compatible API
+// Use a placeholder so the constructor doesn't throw at startup when key is missing
+const groq = new OpenAI({
+  apiKey: groqApiKey || "not-set",
+  baseURL: "https://api.groq.com/openai/v1",
+});
+
+const anthropic = new Anthropic({ apiKey: anthropicApiKey || "not-set" });
 
 const localeToLanguageCode = {
   auto: undefined,
@@ -43,11 +64,62 @@ const localeToLanguageCode = {
 app.use(express.json({ limit: "2mb" }));
 app.use(express.static(__dirname));
 
-app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
-  if (!process.env.OPENAI_API_KEY) {
-    return res.status(500).json({ error: "Server is missing OPENAI_API_KEY." });
-  }
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
+async function transcribeBuffer(buffer, filename, language, prompt) {
+  const result = await groq.audio.transcriptions.create({
+    model: "whisper-large-v3-turbo",
+    file: await toFile(buffer, filename),
+    ...(language ? { language } : {}),
+    ...(prompt ? { prompt } : {}),
+  });
+  return result.text || "";
+}
+
+async function splitToWavChunks(inputPath, tmpDir, chunkMinutes) {
+  const chunkSeconds = chunkMinutes * 60;
+  const pattern = path.join(tmpDir, "chunk_%03d.wav");
+  await execAsync(
+    `ffmpeg -y -i "${inputPath}" -ar 16000 -ac 1 -f segment -segment_time ${chunkSeconds} "${pattern}" 2>&1`
+  );
+  // Collect chunk files in order
+  const { stdout } = await execAsync(`ls "${tmpDir}"/chunk_*.wav 2>/dev/null || true`);
+  return stdout.trim().split("\n").filter(Boolean).sort();
+}
+
+async function transcribeWithChunking(buffer, originalname, language, prompt) {
+  const tmpDir = path.join(tmpdir(), `transcribe-${randomBytes(8).toString("hex")}`);
+  await mkdir(tmpDir, { recursive: true });
+
+  const inputPath = path.join(tmpDir, originalname || "audio.bin");
+  await import("node:fs").then(({ writeFileSync }) => writeFileSync(inputPath, buffer));
+
+  try {
+    const chunkPaths = await splitToWavChunks(inputPath, tmpDir, CHUNK_MINUTES);
+    if (chunkPaths.length === 0) throw new Error("ffmpeg produced no chunks");
+
+    const parts = await Promise.all(
+      chunkPaths.map(async (p) => {
+        const buf = await readFile(p);
+        return transcribeBuffer(buf, path.basename(p), language, prompt);
+      })
+    );
+
+    return parts.join(" ").trim();
+  } finally {
+    await rm(tmpDir, { recursive: true, force: true });
+  }
+}
+
+// ─── Routes ──────────────────────────────────────────────────────────────────
+
+app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
+  if (!groqApiKey) {
+    return res.status(500).json({ error: "Server is missing GROQ_API_KEY." });
+  }
+  if (!anthropicApiKey) {
+    return res.status(500).json({ error: "Server is missing ANTHROPIC_API_KEY." });
+  }
   if (!req.file) {
     return res.status(400).json({ error: "Audio file is required." });
   }
@@ -55,27 +127,39 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
   try {
     const selectedLanguage = req.body.language || "auto";
     const language = localeToLanguageCode[selectedLanguage] || undefined;
+    const whisperPrompt =
+      selectedLanguage === "tanglish"
+        ? "This audio may include code-switched Tamil and English (Tanglish). Preserve both naturally."
+        : undefined;
 
-    const transcription = await openai.audio.transcriptions.create({
-      model: "gpt-4o-mini-transcribe",
-      file: await toFile(req.file.buffer, req.file.originalname || "audio.webm"),
-      ...(language ? { language } : {}),
-      prompt:
-        selectedLanguage === "tanglish"
-          ? "This audio may include code-switched Tamil and English (Tanglish). Preserve both naturally."
-          : undefined,
-    });
+    const fileSizeMB = req.file.buffer.length / (1024 * 1024);
 
-    const rawTranscript = transcription.text || "";
+    let rawTranscript;
+    if (fileSizeMB <= DIRECT_MAX_MB) {
+      // Small enough — transcribe directly
+      rawTranscript = await transcribeBuffer(
+        req.file.buffer,
+        req.file.originalname || "audio.webm",
+        language,
+        whisperPrompt
+      );
+    } else {
+      // Large file — split into chunks with ffmpeg
+      rawTranscript = await transcribeWithChunking(
+        req.file.buffer,
+        req.file.originalname || "audio.bin",
+        language,
+        whisperPrompt
+      );
+    }
 
-    const formatted = await openai.responses.create({
-      model: "gpt-4.1-mini",
-      input: [
-        {
-          role: "system",
-          content:
-            "You format transcripts into detailed, well-structured Markdown without losing content fidelity.",
-        },
+    // Format with Anthropic Claude
+    const formatted = await anthropic.messages.create({
+      model: "claude-opus-4-6",
+      max_tokens: 4096,
+      system:
+        "You format transcripts into detailed, well-structured Markdown without losing content fidelity.",
+      messages: [
         {
           role: "user",
           content:
@@ -92,8 +176,15 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
       ],
     });
 
-    return res.json({ transcript: formatted.output_text?.trim() || rawTranscript });
+    const formattedText = formatted.content
+      .filter((b) => b.type === "text")
+      .map((b) => b.text)
+      .join("")
+      .trim();
+
+    return res.json({ transcript: formattedText || rawTranscript });
   } catch (error) {
+    console.error("Transcribe error:", error);
     return res.status(500).json({
       error: error?.message || "Failed to transcribe audio.",
     });
@@ -101,8 +192,8 @@ app.post("/api/transcribe", upload.single("audio"), async (req, res) => {
 });
 
 app.post("/api/analyze", async (req, res) => {
-  if (!process.env.OPENAI_API_KEY) {
-    return res.status(500).json({ error: "Server is missing OPENAI_API_KEY." });
+  if (!anthropicApiKey) {
+    return res.status(500).json({ error: "Server is missing ANTHROPIC_API_KEY." });
   }
 
   const transcript = req.body?.transcript?.trim();
@@ -113,14 +204,12 @@ app.post("/api/analyze", async (req, res) => {
   }
 
   try {
-    const response = await openai.responses.create({
-      model: "gpt-4.1-mini",
-      input: [
-        {
-          role: "system",
-          content:
-            "You produce detailed, professional Markdown meeting documentation for business users.",
-        },
+    const response = await anthropic.messages.create({
+      model: "claude-opus-4-6",
+      max_tokens: 8192,
+      system:
+        "You produce detailed, professional Markdown meeting documentation for business users. Always respond with valid JSON only.",
+      messages: [
         {
           role: "user",
           content:
@@ -138,29 +227,21 @@ app.post("/api/analyze", async (req, res) => {
             `Transcript:\n${transcript}`,
         },
       ],
-      text: {
-        format: {
-          type: "json_schema",
-          name: "meeting_outputs",
-          schema: {
-            type: "object",
-            additionalProperties: false,
-            properties: {
-              summary: { type: "string" },
-              minutes: { type: "string" },
-            },
-            required: ["summary", "minutes"],
-          },
-        },
-      },
     });
 
-    const parsed = JSON.parse(response.output_text || "{}");
+    const outputText = response.content
+      .filter((b) => b.type === "text")
+      .map((b) => b.text)
+      .join("")
+      .trim();
+
+    const parsed = JSON.parse(outputText || "{}");
     return res.json({
       summary: parsed.summary || "No summary generated.",
       minutes: parsed.minutes || "No minutes generated.",
     });
   } catch (error) {
+    console.error("Analyze error:", error);
     return res.status(500).json({
       error: error?.message || "Failed to generate summary and minutes.",
     });

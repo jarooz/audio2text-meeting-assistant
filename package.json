@@ -8,6 +8,7 @@
     "dev": "node --watch server.js"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.55.0",
     "dotenv": "^16.6.1",
     "express": "^4.21.2",
     "multer": "^1.4.5-lts.2",
